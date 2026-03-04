@@ -1,85 +1,102 @@
-#nombre: Cristian Orellaan
 import simpy
 import random
 import statistics
+import matplotlib.pyplot as plt
 
 # -----------------------------
-# PARÁMETROS FIJOS
+# FUNCIÓN DE SIMULACIÓN
 # -----------------------------
-RANDOM_SEED = 1
-RAM_CAPACITY = 100      # Memoria total disponible
-CPU_SPEED = 3           # Instrucciones por unidad de tiempo
-INTERVAL = 10           # Tiempo promedio entre llegadas
-TOTAL_PROCESSES = 25    # Cantidad de procesos a simular
-
-random.seed(RANDOM_SEED)
-
-# Lista para guardar tiempos finales
-times = []
-
-# -----------------------------
-# PROCESO
-# -----------------------------
-def proceso(env, name, ram, cpu):
+def simular(total_processes, interval, ram_capacity=100, cpu_speed=3, cpu_count=1):
     
-    start_time = env.now  # Momento en que llega
-    
-    memoria = random.randint(1, 10)       # Memoria que necesita
-    instrucciones = random.randint(1, 10) # Instrucciones totales
+    random.seed(1)
+    times = []
 
-    # Solicita memoria RAM
-    yield ram.get(memoria)
+    # Proceso individual
+    def proceso(env, ram, cpu):
+        start_time = env.now
+        memoria = random.randint(1, 10)
+        instrucciones = random.randint(1, 10)
 
-    # Mientras tenga instrucciones pendientes
-    while instrucciones > 0:
-        with cpu.request() as req:
-            yield req
-            yield env.timeout(1)  # Usa CPU por 1 unidad de tiempo
+        yield ram.get(memoria)
 
-            # Ejecuta hasta CPU_SPEED instrucciones
-            ejecutadas = min(CPU_SPEED, instrucciones)
-            instrucciones -= ejecutadas
-
-        # Posible I/O
-        if instrucciones > 0:
-            if random.randint(1, 21) == 1:
+        while instrucciones > 0:
+            with cpu.request() as req:
+                yield req
                 yield env.timeout(1)
 
-    # Devuelve memoria
-    yield ram.put(memoria)
+                ejecutadas = min(cpu_speed, instrucciones)
+                instrucciones -= ejecutadas
 
-    # Guarda tiempo total en el sistema
-    times.append(env.now - start_time)
+            if instrucciones > 0:
+                if random.randint(1, 21) == 1:
+                    yield env.timeout(1)
 
+        yield ram.put(memoria)
+        times.append(env.now - start_time)
 
-# -----------------------------
-# GENERADOR DE PROCESOS
-# -----------------------------
-def generador(env, total, ram, cpu):
-    for i in range(total):
-        env.process(proceso(env, f"Proceso {i}", ram, cpu))
-        yield env.timeout(random.expovariate(1.0 / INTERVAL))
-
-
-# -----------------------------
-# FUNCIÓN PRINCIPAL
-# -----------------------------
-def simular():
+    # Generador de procesos
+    def generador(env, total, ram, cpu):
+        for _ in range(total):
+            env.process(proceso(env, ram, cpu))
+            yield env.timeout(random.expovariate(1.0 / interval))
 
     env = simpy.Environment()
+    ram = simpy.Container(env, init=ram_capacity, capacity=ram_capacity)
+    cpu = simpy.Resource(env, capacity=cpu_count)
 
-    ram = simpy.Container(env, init=RAM_CAPACITY, capacity=RAM_CAPACITY)
-    cpu = simpy.Resource(env, capacity=1)
-
-    env.process(generador(env, TOTAL_PROCESSES, ram, cpu))
+    env.process(generador(env, total_processes, ram, cpu))
     env.run()
 
-    promedio = statistics.mean(times)
-    desviacion = statistics.stdev(times)
-
-    print("Tiempo promedio:", promedio)
-    print("Desviación estándar:", desviacion)
+    return statistics.mean(times) , statistics.stdev(times)
 
 
-# Ejecutar simulación
-simular()
+# -----------------------------
+# GENERACIÓN DE GRÁFICAS
+# -----------------------------
+
+process_counts = [25, 50, 100, 150, 200]
+intervals = [10, 5, 1]
+
+configuraciones = [
+    ("Normal", 100, 3, 1),
+    ("RAM_200", 200, 3, 1),
+    ("CPU_Rapido", 100, 6, 1),
+    ("2_CPUs", 100, 3, 2)
+]
+
+for interval in intervals:
+
+    plt.figure()
+    print("\n==============================")
+    print(f"INTERVALO = {interval}")
+    print("==============================")
+
+    for nombre, ram_cap, cpu_spd, cpu_cnt in configuraciones:
+
+        means = []
+
+        print(f"\nConfiguración: {nombre}")
+
+        for p in process_counts:
+
+            promedio, desviacion = simular(
+                p,
+                interval,
+                ram_capacity=ram_cap,
+                cpu_speed=cpu_spd,
+                cpu_count=cpu_cnt
+            )
+
+            means.append(promedio)
+
+            print(f"Procesos: {p}")
+            print(f"  Promedio: {promedio:.4f}")
+            print(f"  Desviación: {desviacion:.4f}")
+
+        plt.plot(process_counts, means, label=nombre)
+
+    plt.xlabel("Número de procesos")
+    plt.ylabel("Tiempo promedio")
+    plt.title(f"Comparación de configuraciones | Intervalo = {interval}")
+    plt.legend()
+    plt.show()
